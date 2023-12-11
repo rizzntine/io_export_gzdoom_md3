@@ -420,7 +420,8 @@ class BlenderSurface:
 # may be fused together into one model
 class BlenderModelManager:
     def __init__(self, gzdoom, model_name, ref_frame=None, frame_name="MDLA",
-                 scale=1, frame_time=0, depsgraph=None):
+                 model_path="",texture_path="",scale=1, frame_time=0,
+                 depsgraph=None):
         self.md3 = MD3Object()
         self.md3.name = model_name
         self.material_surfaces = OrderedDict()
@@ -459,6 +460,8 @@ class BlenderModelManager:
         self.scale = scale
         self.name = model_name
         self.depsgraph = depsgraph
+        self.model_path = model_path
+        self.texture_path = texture_path
 
     def save(self, filename, modeldef=False, actordef=False):
         from bpy.path import basename
@@ -685,9 +688,13 @@ class BlenderModelManager:
         self.tag_objects.append(bobject)
 
     def get_modeldef(self, md3fname):
+        model_path = self.model_path
+        texture_path = self.texture_path
         model_def = """Model {actor_name}
 {{
+    {model_path}
     Model 0 "{file_name}"
+    {texture_path}
     Scale {scale:.6f} {scale:.6f} {zscale:.6f}
     USEACTORPITCH
     USEACTORROLL
@@ -696,6 +703,8 @@ class BlenderModelManager:
 }}"""
         sprite_coder = BaseCoder(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_")
         frame_coder = BaseCoder(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]")
+        model_path = f"Path \"{model_path}\"\n" if model_path else ""
+        texture_path = f"Path \"{texture_path}\"\n" if texture_path else ""
         scale = 1
         if 0 < self.scale < 1:  # Upscale to normal size with MODELDEF
             scale = 1 / self.scale
@@ -716,6 +725,7 @@ class BlenderModelManager:
                 frame_number=frame))
         return model_def.format(
             actor_name=self.name, file_name=md3fname, scale=scale,
+            model_path=model_path,texture_path=texture_path,
             zscale=zscale, frames="\n    ".join(modeldef_frames))
 
     def get_zscript(self):
@@ -887,7 +897,8 @@ def save_md3(
         filepath, log_type, depsgraph, md3name="", dump_all=False, ref_frame=-1,
         orig_frame=None, gzdoom=True, sprite_name=False, sprite_tics=1,
         offsetx=0, offsety=0, offsetz=0, scale=1, gen_actordef=False,
-        gen_modeldef=False, axis_forward='Y', axis_up='Z'):
+        gen_modeldef=False,gen_modeldef_mdlpath="",gen_modeldef_texpath="",
+        axis_forward='Y', axis_up='Z'):
     starttime = time.perf_counter()  # start timer
     fullpath = splitext(filepath)[0]
     modelname = basename(fullpath)
@@ -908,7 +919,7 @@ def save_md3(
         ref_frame = orig_frame
     message(log, "###################### BEGIN ######################")
     model = BlenderModelManager(
-        gzdoom, md3name, ref_frame, sprite_name, scale, sprite_tics, depsgraph)
+        gzdoom, md3name, ref_frame, sprite_name,gen_modeldef_mdlpath,gen_modeldef_texpath, scale, sprite_tics, depsgraph)
     # Set up "fix" transformation matrix
     scale_fix = Matrix.Scale(scale, 4)
     pos_fix = Matrix.Translation((offsetx, offsety, offsetz))
@@ -1022,6 +1033,17 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
         description="Generate a Modeldef.txt file for the model. The filename "
             "will be modeldef.modelname.txt",
         default=False)
+    gen_modeldef_mdlpath: bpy.props.StringProperty(
+        name="Model path",
+        description="Specifies the folder path of the model in a PK3."
+        "This will append a Path parameter in the modeldef file.",
+        default="")
+    gen_modeldef_texpath: bpy.props.StringProperty(
+        name="Texture path",
+        description="Specifies the path of the textures of the model in a"
+        "PK3 in-case they are not in the same folder as the model. This"
+        "will append a second Path after the model definition.",
+        default="")
     gen_actordef: bpy.props.BoolProperty(
         name="Generate ZScript",
         description="Generate a ZScript actor definition for the model. The "
@@ -1062,6 +1084,8 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
         col.prop(self, "gen_actordef")
         col.prop(self, "gen_modeldef")
         if self.gen_actordef or self.gen_modeldef:
+            col.prop(self, "gen_modeldef_mdlpath")
+            col.prop(self, "gen_modeldef_texpath")
             col.prop(self, "sprite_name")
         if self.gen_actordef:
             col.prop(self, "sprite_tics")
