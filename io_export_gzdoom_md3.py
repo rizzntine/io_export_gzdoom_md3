@@ -18,10 +18,11 @@
 #
 # Updates and additions for Blender 2.6X by Derek McPherson
 # Updates for Blender 3.2.0 by Kevin Caccamo and Nash Muhandes
+# Further Modifications by Rizzntine
 #
 bl_info = {
         "name": "GZDoom .MD3",
-        "author": "Derek McPherson, Xembie, PhaethonH, Bob Holcomb, Damien McGinnes, Robert (Tr3B) Beckebans, CoDEmanX, Mexicouger, Nash Muhandes, Kevin Caccamo",
+        "author": "Derek McPherson, Xembie, PhaethonH, Bob Holcomb, Damien McGinnes, Robert (Tr3B) Beckebans, CoDEmanX, Mexicouger, Nash Muhandes, Kevin Caccamo, Rizzntine",
         "version": (2, 0, 0),
         "blender": (3, 2, 0),
         "location": "File > Export > GZDoom model (.md3)",
@@ -490,7 +491,7 @@ class BlenderModelManager:
         return (pack(MD3Vertex.binary_format, *md3_position, md3_normal)
               + pack(MD3TexCoord.binary_format, *uv))
 
-    def add_mesh(self, mesh_obj):
+    def add_mesh(self, mesh_obj, texformat):
         """
         Add a mesh to the object. Does nothing if the animation frames have
         been added.
@@ -521,6 +522,7 @@ class BlenderModelManager:
                 face_mtl = mesh_obj.get("md3shader")
             if face_mtl is None:
                 face_mtl = obj_mesh.materials[face.material_index].name
+            face_mtl = str(face_mtl) + str(texformat)
             # Add the new surface to material_surfaces if it isn't already in
             if face_mtl not in self.material_surfaces:
                 bsurface = BlenderSurface(face_mtl)
@@ -695,6 +697,7 @@ class BlenderModelManager:
     {model_path}
     Model 0 "{file_name}"
     {texture_path}
+    {skins}
     Scale {scale:.6f} {scale:.6f} {zscale:.6f}
     USEACTORPITCH
     USEACTORROLL
@@ -705,6 +708,15 @@ class BlenderModelManager:
         frame_coder = BaseCoder(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]")
         model_path = f"Path \"{model_path}\"\n" if model_path else ""
         texture_path = f"Path \"{texture_path}\"\n" if texture_path else ""
+        skins_def = (
+            "SurfaceSkin 0 {mesh_number} \"{texture_name}\"")
+        modeldef_skins = []
+        for surface_num,s in enumerate(self.md3.surfaces):
+            texture_name = self.md3.surfaces[surface_num].name
+            mesh_number = len(modeldef_skins)
+            modeldef_skins.append(skins_def.format(
+                mesh_number=mesh_number,
+                texture_name=texture_name))
         scale = 1
         if 0 < self.scale < 1:  # Upscale to normal size with MODELDEF
             scale = 1 / self.scale
@@ -726,7 +738,8 @@ class BlenderModelManager:
         return model_def.format(
             actor_name=self.name, file_name=md3fname, scale=scale,
             model_path=model_path,texture_path=texture_path,
-            zscale=zscale, frames="\n    ".join(modeldef_frames))
+            zscale=zscale, frames="\n    ".join(modeldef_frames),
+            skins="\n    ".join(modeldef_skins))
 
     def get_zscript(self):
         actor_def = """class {actor_name} : Actor
@@ -898,7 +911,7 @@ def save_md3(
         orig_frame=None, gzdoom=True, sprite_name=False, sprite_tics=1,
         offsetx=0, offsety=0, offsetz=0, scale=1, gen_actordef=False,
         gen_modeldef=False,gen_modeldef_mdlpath="",gen_modeldef_texpath="",
-        axis_forward='Y', axis_up='Z'):
+        texformat='',axis_forward='Y', axis_up='Z'):
     starttime = time.perf_counter()  # start timer
     fullpath = splitext(filepath)[0]
     modelname = basename(fullpath)
@@ -933,13 +946,13 @@ def save_md3(
         # If multiple objects are selected, they are joined together
         for bobject in bpy.context.selected_objects:
             if bobject.type == 'MESH':
-                model.add_mesh(bobject)
+                model.add_mesh(bobject,texformat)
             elif bobject.type == 'EMPTY':
                 model.add_tag(bobject)
         if (bpy.context.active_object and
             bpy.context.active_object not in bpy.context.selected_objects):
             if bpy.context.active_object.type == 'MESH':
-                model.add_mesh(bpy.context.active_object)
+                model.add_mesh(bpy.context.active_object,texformat)
             elif bpy.context.active_object.type == 'EMPTY':
                 model.add_tag(bpy.context.active_object)
     model.setup_frames()
@@ -1023,6 +1036,12 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
         description="The frame to use for vertices, UVs, and triangles. If "
         "not specified, uses the current frame in the current scene",
         default=0)
+    texformat: bpy.props.StringProperty(
+        name="Texture File Format",
+        description="Appends a file format to existing md3shader custom "
+        "properties, if they are not specified. Eg. writing \".png\" "
+        "would append it as ExampleTexture.png",
+        default="")
     gzdoom: bpy.props.BoolProperty(
         name="Export for GZDoom",
         description="Export the model for GZDoom; Fixes normals pointing "
@@ -1080,6 +1099,7 @@ class ExportMD3(bpy.types.Operator, ExportHelper):
             row.prop(self, "ref_frame")
         else:
             row.prop(self, "use_ref_frame")
+        col.prop(self, "texformat")
         col.prop(self, "gzdoom")
         col.prop(self, "gen_actordef")
         col.prop(self, "gen_modeldef")
